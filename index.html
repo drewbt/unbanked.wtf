@@ -9,8 +9,8 @@
     :root { --bg:#0b0b0c; --fg:#e9e9ea; --muted:#9a9aa1; --card:#121214; --line:#2a2a2d; --accent:#8fd3ff; --ok:#3ddc97; --warn:#f5a524; --err:#ff5d5d; }
     *{ box-sizing:border-box }
     html,body{ min-height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
-    body{ overflow:auto } /* page can scroll on mobile */
-    .wrap{ max-width:980px; margin:0 auto; padding:16px } /* fluid container */
+    body{ overflow:auto }
+    .wrap{ max-width:980px; margin:0 auto; padding:16px }
     .card{ border:1px solid var(--line); background:var(--card); border-radius:14px; padding:14px; display:grid; gap:12px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:8px }
     .row{ display:grid; gap:8px }
@@ -41,7 +41,7 @@
         <strong>Unbanked</strong>
         <span class="tiny muted">Recipient-locked claims • Mint-on-claim</span>
       </header>
-      <div class="row" style="align-content:start">
+      <div class="row">
         <h3 style="margin:0 0 6px 0">Welcome</h3>
         <div class="row">
           <label>Handle</label>
@@ -73,11 +73,10 @@
       <header>
         <div class="row-inline" style="gap:10px; flex-wrap:nowrap; overflow:hidden">
           <strong>Unbanked</strong>
-          <span class="muted">Signed in as</span>
-          <span id="who" class="pill mono" style="max-width:48vw; overflow:hidden; text-overflow:ellipsis"></span>
+          <span id="who" class="pill mono" style="max-width:56vw; overflow:hidden; text-overflow:ellipsis"></span>
           <a id="logout" href="#" class="pill warn" title="Log out">Logout</a>
         </div>
-        <div class="row-inline tiny" style="justify-self:end; max-width:52vw; overflow:hidden; text-overflow:ellipsis">
+        <div class="row-inline tiny" style="justify-self:end; max-width:40vw; overflow:hidden; text-overflow:ellipsis">
           <span class="muted">Balances:</span>
           <span id="balancesLine" class="mono">—</span>
         </div>
@@ -152,7 +151,6 @@
   </div>
 
   <script>
-    // DOM
     const $ = id => document.getElementById(id);
     const authScreen = $("authScreen");
     const appScreen = $("appScreen");
@@ -184,7 +182,6 @@
     const older = $("older");
     const pageInfo = $("pageInfo");
 
-    // Helpers
     function showAuth(){ authScreen.style.display="grid"; appScreen.style.display="none"; }
     function showApp(){ authScreen.style.display="none"; appScreen.style.display="grid"; }
     function toast(el,msg,cls="muted"){ el.textContent=msg; el.className="tiny "+cls; }
@@ -195,7 +192,6 @@
     function uiAuth(){ const k=localStorage.getItem("ub_apiKey"); if(!k){ showAuth(); return; } who.textContent="@"+(localStorage.getItem("ub_handle")||"anonymous"); showApp(); refreshAll(); }
     function authHeaders(){ const k=localStorage.getItem("ub_apiKey")||""; return k? {authorization:"Bearer "+k,"content-type":"application/json"} : {"content-type":"application/json"}; }
 
-    // API
     async function apiAuthenticate(handle, secret, acceptedDisclaimer){
       const r=await fetch("/api/authenticate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({handle,secret,acceptedDisclaimer})});
       const j=await r.json(); if(!r.ok) throw new Error(j.error||"authenticate failed"); return j;
@@ -213,13 +209,11 @@
       const j=await r.json(); if(!r.ok) throw new Error(j.error||"history failed"); return j;
     }
 
-    // State
     let lastBalances = {};
     let lastTx = [];
     let page = { offset: 0, limit: 100, total: 0, hasOlder: false, hasNewer: false };
     let currentFilter = "all";
 
-    // Render
     function renderBalancesLine(){
       const entries = Object.entries(lastBalances).filter(([,v])=>Math.abs(v) > 1e-12);
       const parts = entries.sort((a,b)=> a[0].localeCompare(b[0])).map(([cur,val]) => `${fmt2(val)} ${cur}`);
@@ -241,7 +235,6 @@
       totalsEl.textContent = parts.length ? parts.join("  ·  ") : "—";
     }
 
-    // Actions
     currencyEl.addEventListener("change",()=>{ customCurEl.style.display = (currencyEl.value==="CUSTOM")?"inline-block":"none"; });
     tabs.forEach(tab => tab.addEventListener("click", ()=>{ tabs.forEach(t=>t.classList.remove("active")); tab.classList.add("active"); currentFilter = tab.getAttribute("data-filter") || "all"; renderHistory(); }));
 
@@ -249,7 +242,7 @@
       const h=(authHandle.value||"").trim();
       const s=authSecret.value;
       if (!h || !s) { toast(authMsg,"Enter handle and secret.","err"); return; }
-      const accepted = !!acceptDisclaimer.checked; // required only for first-time users
+      const accepted = !!acceptDisclaimer.checked;
       try { const a = await apiAuthenticate(h,s,accepted); setAuth(a); showApp(); }
       catch(err){ toast(authMsg, String(err.message||err), "err"); }
     });
@@ -271,14 +264,12 @@
     });
 
     copyBtn.addEventListener("click", async ()=>{ try{ await navigator.clipboard.writeText(linkOut.value); toast(linkMsg,"Copied","ok"); } catch{ linkOut.select(); document.execCommand("copy"); toast(linkMsg,"Copied (fallback)","ok"); } });
-
     logoutBtn.addEventListener("click", (e)=>{ e.preventDefault(); setAuth(null); showAuth(); });
 
     newer.addEventListener("click", async (e)=>{ e.preventDefault(); if (!page.hasNewer) return; await loadHistory(Math.max(0, page.offset - page.limit)); });
     older.addEventListener("click", async (e)=>{ e.preventDefault(); if (!page.hasOlder) return; await loadHistory(page.offset + page.limit); });
     refreshBtn.addEventListener("click", async (e)=>{ e.preventDefault(); await refreshAll(); });
 
-    // Loaders
     async function loadBalances(){ const { balances } = await apiHistory(0, 1); lastBalances = balances || {}; renderBalancesLine(); }
     async function loadHistory(offset=0){
       const res = await apiHistory(offset, 100);
@@ -290,12 +281,10 @@
     }
     async function refreshAll(){ if (!localStorage.getItem("ub_apiKey")) { showAuth(); return; } await loadBalances(); await loadHistory(page.offset || 0); }
 
-    // Boot
     (async function boot(){
       if (!localStorage.getItem("ub_apiKey")) showAuth(); else showApp();
       uiAuth();
 
-      // Auto-claim ?claim=...
       const claim = new URL(location.href).searchParams.get("claim");
       if (claim && localStorage.getItem("ub_apiKey")){
         try {
