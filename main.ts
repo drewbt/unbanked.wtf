@@ -1,4 +1,5 @@
-// Unbanked — payment-link fix: robust handle parsing + helpful errors
+// Unbanked — robust Generate Link: better input validation, clearer errors, audit logs
+// Features: recipient-locked claims, mint-on-claim, single Authenticate, KV-backed history
 
 const kv = await Deno.openKv();
 const INDEX_HTML = await Deno.readTextFile(new URL("./index.html", import.meta.url));
@@ -15,7 +16,7 @@ type Txn = {
 
 // KV keys
 const kUserByHandleLower = (h: string) => ["userByHandle", h.toLowerCase()] as const;
-const kUserByHandleRaw   = (h: string) => ["userByHandle", h] as const; // legacy
+const kUserByHandleRaw   = (h: string) => ["userByHandle", h] as const; // legacy index (pre-lowercasing)
 const kUser = (id: string) => ["user", id] as const;
 const kApiKey = (apiKey: string) => ["apiKey", apiKey] as const;
 const kPending = (claimId: string) => ["pending", claimId] as const;
@@ -23,6 +24,7 @@ const kBalance = (userId: string, cur: string) => ["balance", userId, cur] as co
 const kTxPrefix = (userId: string) => ["tx", userId] as const;
 const kTx = (userId: string, ts: number, id: string) => ["tx", userId, ts, id] as const;
 
+// utils
 const enc = new TextEncoder();
 function nowSec(){ return Math.floor(Date.now()/1000); }
 function uuid(){ return crypto.randomUUID(); }
@@ -31,13 +33,17 @@ function json(status: number, body: unknown, headers: HeadersInit = {}){ return 
 function bad(msg: string, status=400){ return json(status, { error: msg }); }
 function audit(event: string, data: Record<string, unknown> = {}){ console.log(JSON.stringify({ ts: nowSec(), evt: event, ...data })); }
 
-// --- Lookups with legacy backfill ---
+// lookups (with legacy backfill)
 async function getUserByHandle(handle: string): Promise<User|null> {
   const lc = handle.toLowerCase();
   let id = await kv.get<string>(kUserByHandleLower(lc));
   if (!id.value) {
     const legacy = await kv.get<string>(kUserByHandleRaw(handle));
-    if (legacy.value){ await kv.set(kUserByHandleLower(lc), legacy.value); audit("index.backfill", { handle, to: lc, userId: legacy.value }); id = legacy; }
+    if (legacy.value) {
+      await kv.set(kUserByHandleLower(lc), legacy.value);
+      audit("index.backfill", { handle, to: lc, userId: legacy.value });
+      id = legacy;
+    }
   }
   if (!id.value) return null;
   const u = await kv.get<User>(kUser(id.value));
@@ -47,12 +53,12 @@ async function getUserById(userId: string){ const u=await kv.get<User>(kUser(use
 async function getUserByApiKey(apiKey: string){ const uid=await kv.get<string>(kApiKey(apiKey)); if(!uid.value) return null; return await getUserById(uid.value); }
 async function authUser(req: Request){ const a=req.headers.get("authorization")||""; const token=a.startsWith("Bearer ")? a.slice(7):""; return token? getUserByApiKey(token): null; }
 
-// --- Balance + TX helpers ---
+// KV helpers
 async function creditBalance(userId: string, cur: string, amount: number){
   const key = kBalance(userId, cur);
-  for (let i=0;i<8;i++){
+  for (let i=0;i<12;i++){
     const curVal = await kv.get<number>(key);
-    const ver = curVal.versionstamp;
+    const ver = curVal.versionstamp; // null OK
     const next = (curVal.value ?? 0) + amount;
     const res = await kv.atomic().check({ key, versionstamp: ver }).set(key, next).commit();
     if (res.ok) return next;
@@ -64,12 +70,12 @@ async function recordTx(t: Txn){
   audit("tx.recorded", { userId:t.userId, userHandle:t.userHandle, kind:t.kind, amount:t.amount, currency:t.currency, note:t.note, counterparty:t.counterpartyHandle, txId:t.id, ts:t.ts });
 }
 
-// --- HTTP ---
+// server
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const { pathname } = url;
 
-  // Static
+  // static
   if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
     return new Response(INDEX_HTML, { headers: { "content-type":"text/html; charset=utf-8" } });
   }
@@ -83,7 +89,7 @@ Deno.serve(async (req) => {
     }});
   }
 
-  // Authenticate (login or create)
+  // authenticate (login-or-create)
   if (pathname === "/api/authenticate" && req.method === "POST") {
     const b = await req.json().catch(()=> ({}));
     const handle = String(b.handle||"").trim();
@@ -116,33 +122,39 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Create recipient-locked link (robust handle parsing)
+  // create recipient-locked link (now resilient)
   if (pathname === "/api/link" && req.method === "POST") {
     const me = await authUser(req);
-    if (!me) return bad("unauthorized", 401);
+    if (!me) { audit("link.err.unauth", {}); return bad("unauthorized", 401); }
     const b = await req.json().catch(()=> ({}));
+
+    // sanitize handle
     let to = String(b.toHandle||"").trim();
-    if (to.startsWith("@")) to = to.slice(1); // tolerate @alice
-    const amount = Number(b.amount);
-    const currency = String(b.currency||"").toUpperCase();
-    const note = String(b.note||"");
-    if (!/^[a-z0-9_.-]{3,32}$/i.test(to)) return bad("valid toHandle required (letters, numbers, _ . -)");
-    if (!isFinite(amount) || amount<=0) return bad("amount must be > 0");
-    if (!currency || currency.length<2 || currency.length>6) return bad("invalid currency code");
+    if (to.startsWith("@")) to = to.slice(1);
+    // sanitize amount (also accept "12,5")
+    const rawAmt = String(b.amount ?? "").replace(/\s+/g,"").replace(",",".");
+    const amount = Number(rawAmt);
+    const currency = String(b.currency||"").trim().toUpperCase();
+    const note = String(b.note||"").trim();
+
+    if (!/^[a-z0-9_.-]{3,32}$/i.test(to)) { audit("link.err.badTo",{to}); return bad("valid toHandle required (letters, numbers, _ . -)"); }
+    if (!isFinite(amount) || amount<=0) { audit("link.err.badAmount",{rawAmt}); return bad("amount must be > 0"); }
+    if (!/^[A-Z0-9]{2,6}$/.test(currency)) { audit("link.err.badCur",{currency}); return bad("invalid currency code"); }
 
     const claimId = uuid();
     const p: Pending = { claimId, fromUserId: me.userId, toHandle: to.toLowerCase(), amount:+amount.toFixed(8), currency, note, createdAt: nowSec() };
     await kv.set(kPending(claimId), p);
 
+    // sender history (no debit)
     const ts = nowSec();
     await recordTx({ id:`send:${claimId}`, userId: me.userId, userHandle: me.handle, kind:"debit", amount:p.amount, currency:p.currency, note: p.note || `Payment link created for @${to}`, counterpartyHandle: to, ts });
 
-    audit("link.created", { claimId, fromUserId: me.userId, fromHandle: me.handle, toHandle: p.toHandle, amount: p.amount, currency: p.currency });
     const link = `${url.origin}/?claim=${encodeURIComponent(claimId)}`;
+    audit("link.created", { claimId, fromUserId: me.userId, fromHandle: me.handle, toHandle: p.toHandle, amount: p.amount, currency: p.currency, link });
     return json(200, { claimId, url: link });
   }
 
-  // Claim (must match intended handle)
+  // claim
   if (pathname === "/api/claim" && req.method === "POST") {
     const me = await authUser(req);
     if (!me) return bad("unauthorized", 401);
@@ -170,13 +182,13 @@ Deno.serve(async (req) => {
     return json(200, { ok:true, credited:{ amount:p.amount, currency:p.currency }, from: fromHandle });
   }
 
-  // History
+  // history
   if (pathname === "/api/history" && req.method === "GET") {
     const me = await authUser(req);
     if (!me) return bad("unauthorized", 401);
-    const url = new URL(req.url);
-    const offset = Math.max(0, Number(url.searchParams.get("offset") || "0"));
-    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") || "100")));
+    const qs = new URL(req.url);
+    const offset = Math.max(0, Number(qs.searchParams.get("offset") || "0"));
+    const limit = Math.min(500, Math.max(1, Number(qs.searchParams.get("limit") || "100")));
     const all: Txn[] = [];
     for await (const e of kv.list<Txn>({ prefix: kTxPrefix(me.userId) })) if (e.value) all.push(e.value);
     all.sort((a,b)=> b.ts - a.ts);
