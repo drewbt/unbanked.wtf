@@ -1,5 +1,4 @@
-// Unbanked — mobile-scroll + KV history + username audit logs + single Authenticate
-// Deno Deploy entrypoint
+// Unbanked — header cleanup + legacy handle index backfill + KV history + audit logs
 
 const kv = await Deno.openKv();
 const INDEX_HTML = await Deno.readTextFile(new URL("./index.html", import.meta.url));
@@ -26,7 +25,7 @@ type Pending = {
 type Txn = {
   id: string;
   userId: string;
-  userHandle: string;      // added for convenience when reading raw KV
+  userHandle: string;      // redundancy to ease ad-hoc reads
   kind: "credit" | "debit";
   amount: number;
   currency: string;
@@ -35,8 +34,9 @@ type Txn = {
   ts: number;
 };
 
-// KV keys (handles stored lowercased)
-const kUserByHandle = (h: string) => ["userByHandle", h.toLowerCase()] as const;
+// KV keys
+const kUserByHandleLower = (h: string) => ["userByHandle", h.toLowerCase()] as const;
+const kUserByHandleRaw   = (h: string) => ["userByHandle", h] as const; // legacy (pre-lowercasing)
 const kUser         = (id: string) => ["user", id] as const;
 const kApiKey       = (apiKey: string) => ["apiKey", apiKey] as const;
 const kPending      = (claimId: string) => ["pending", claimId] as const;
@@ -56,48 +56,63 @@ function json(status: number, body: unknown, headers: HeadersInit = {}) {
 }
 function bad(msg: string, status=400){ return json(status, { error: msg }); }
 
-// --------- Audit logging (goes to Deno Deploy logs) ---------
+// --------- Audit logging (Deploy logs; not a database) ---------
 function audit(event: string, data: Record<string, unknown> = {}){
-  // Printed JSON lines are visible in Deploy logs; not a database (see notes below).
   console.log(JSON.stringify({ ts: nowSec(), evt: event, ...data }));
 }
 
-// Lookups / auth helpers
+// --------- Lookups / auth with legacy backfill ---------
 async function getUserByHandle(handle: string): Promise<User|null> {
-  const id = await kv.get<string>(kUserByHandle(handle));
+  const lc = handle.toLowerCase();
+  // 1) preferred: lowercase index
+  let id = await kv.get<string>(kUserByHandleLower(lc));
+  if (!id.value) {
+    // 2) legacy: raw-case index
+    const legacy = await kv.get<string>(kUserByHandleRaw(handle));
+    if (legacy.value) {
+      // Backfill lowercase index so future reads succeed
+      await kv.set(kUserByHandleLower(lc), legacy.value);
+      audit("index.backfill", { handle, to: lc, userId: legacy.value });
+      id = legacy;
+    }
+  }
   if (!id.value) return null;
   const u = await kv.get<User>(kUser(id.value));
   return u.value ?? null;
 }
+
 async function getUserById(userId: string): Promise<User|null> {
   const u = await kv.get<User>(kUser(userId));
   return u.value ?? null;
 }
+
 async function getUserByApiKey(apiKey: string): Promise<User|null> {
   const uid = await kv.get<string>(kApiKey(apiKey));
   if (!uid.value) return null;
   return await getUserById(uid.value);
 }
+
 async function authUser(req: Request){
   const a = req.headers.get("authorization") || "";
   const token = a.startsWith("Bearer ")? a.slice(7):"";
   return token ? getUserByApiKey(token) : null;
 }
 
-// Balance + TX helpers (KV is the source of truth; clients fetch on demand)
+// --------- Balance + TX helpers ---------
 async function creditBalance(userId: string, cur: string, amount: number) {
   const key = kBalance(userId, cur);
   for (let i=0;i<8;i++){
     const curVal = await kv.get<number>(key);
-    const ver = curVal.versionstamp;
+    const ver = curVal.versionstamp; // null means key absent → acts like "ensure not exists"
     const next = (curVal.value ?? 0) + amount;
     const res = await kv.atomic().check({ key, versionstamp: ver }).set(key, next).commit();
     if (res.ok) return next;
   }
   throw new Error("balance contention");
 }
+
 async function recordTx(t: Txn){
-  await kv.set(kTx(t.userId, t.ts, t.id), t); // Stored in KV → consistent across devices
+  await kv.set(kTx(t.userId, t.ts, t.id), t);
   audit("tx.recorded", {
     userId: t.userId, userHandle: t.userHandle, kind: t.kind,
     amount: t.amount, currency: t.currency, note: t.note,
@@ -105,12 +120,12 @@ async function recordTx(t: Txn){
   });
 }
 
-// HTTP
+// --------- HTTP ---------
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const { pathname } = url;
 
-  // Static app
+  // Static
   if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
     return new Response(INDEX_HTML, { headers: { "content-type":"text/html; charset=utf-8" } });
   }
@@ -124,7 +139,7 @@ Deno.serve(async (req) => {
     }});
   }
 
-  // -------- Authenticate (login or create) --------
+  // ---- Authenticate (login or create) ----
   // POST /api/authenticate {handle, secret, acceptedDisclaimer?}
   if (pathname === "/api/authenticate" && req.method === "POST") {
     const b = await req.json().catch(()=> ({}));
@@ -133,8 +148,6 @@ Deno.serve(async (req) => {
     const accepted = !!b.acceptedDisclaimer;
 
     if (!handle || !secret) return bad("handle and secret required");
-
-    const handleKey = handle.toLowerCase();
     if (!/^[a-z0-9_.-]{3,32}$/i.test(handle)) return bad("invalid handle");
 
     const existing = await getUserByHandle(handle);
@@ -151,9 +164,10 @@ Deno.serve(async (req) => {
       const user: User = { userId, handle, secretHash: await sha256(secret), createdAt: nowSec() };
       const apiKey = uuid();
 
+      // Use lowercase index from day one
       const ok = await kv.atomic()
-        .check({ key: kUserByHandle(handleKey), versionstamp: null })
-        .set(kUserByHandle(handleKey), userId)
+        .check({ key: kUserByHandleLower(handle), versionstamp: null })
+        .set(kUserByHandleLower(handle), userId)
         .set(kUser(userId), user)
         .set(kApiKey(apiKey), userId)
         .commit();
@@ -164,7 +178,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // -------- Payments --------
+  // ---- Payments ----
   // Create recipient-locked link
   if (pathname === "/api/link" && req.method === "POST") {
     const me = await authUser(req);
@@ -189,7 +203,7 @@ Deno.serve(async (req) => {
     };
     await kv.set(kPending(claimId), p);
 
-    // Sender history only (no debit of balance)
+    // Sender history only (no debit)
     const ts = nowSec();
     await recordTx({
       id:`send:${claimId}`, userId: me.userId, userHandle: me.handle, kind: "debit",
@@ -203,7 +217,7 @@ Deno.serve(async (req) => {
     return json(200, { claimId, url: link });
   }
 
-  // Claim (must match intended handle)
+  // Claim (must match intended handle; mint-on-claim)
   if (pathname === "/api/claim" && req.method === "POST") {
     const me = await authUser(req);
     if (!me) return bad("unauthorized", 401);
@@ -236,7 +250,7 @@ Deno.serve(async (req) => {
     return json(200, { ok:true, credited:{ amount:p.amount, currency:p.currency }, from: fromHandle });
   }
 
-  // -------- History (paginated) --------
+  // ---- History (paginated; KV is source-of-truth) ----
   // GET /api/history?offset=0&limit=100
   if (pathname === "/api/history" && req.method === "GET") {
     const me = await authUser(req);
@@ -244,7 +258,6 @@ Deno.serve(async (req) => {
     const offset = Math.max(0, Number(url.searchParams.get("offset") || "0"));
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") || "100")));
 
-    // Read user's TX directly from KV so history is device-agnostic
     const all: Txn[] = [];
     for await (const e of kv.list<Txn>({ prefix: kTxPrefix(me.userId) })) {
       if (e.value) all.push(e.value);
@@ -254,7 +267,6 @@ Deno.serve(async (req) => {
     const hasOlder = offset + limit < all.length;
     const hasNewer = offset > 0;
 
-    // Current balances from KV
     const balances: Record<string, number> = {};
     for await (const e of kv.list<number>({ prefix: ["balance", me.userId] })) {
       const cur = String(e.key[2]);
