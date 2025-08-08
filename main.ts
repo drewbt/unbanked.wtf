@@ -1,7 +1,7 @@
-// Unbanked (Deno Deploy) — Balances in header, paginated history, mint-on-send
+// Unbanked (Deno Deploy) — login-first, paginated history, mint-on-send
 // - Serves index.html
-// - Signup/Login (no email flows in UI)
-// - Payment links never expire; claiming credits the receiver only (mint-on-send)
+// - Signup/Login (no email flows)
+// - Payment links never expire; claiming credits receiver only (mint-on-send)
 // - History endpoint supports pagination (?offset=&limit=)
 // - Balances are per-user per-currency totals from claims (credits only)
 
@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
   // ------- Auth -------
   if (pathname === "/api/signup" && req.method === "POST") {
     const b = await req.json().catch(()=> ({}));
-    let { handle, secret, email, acceptedDisclaimer } = b;
+    let { handle, secret, acceptedDisclaimer } = b;
     if (!handle || typeof handle!=="string") return bad("handle required");
     if (!secret || typeof secret!=="string" || secret.length<6) return bad("secret >= 6 chars required");
     if (!acceptedDisclaimer) return bad("accept disclaimer to continue");
@@ -133,38 +133,26 @@ Deno.serve(async (req) => {
     const exists = await getUserByHandle(handle);
     if (exists) return bad("handle already taken", 409);
 
-    let emailNorm: string|undefined = undefined;
-    if (email) {
-      emailNorm = String(email).toLowerCase().trim();
-      const byEmail = await getUserByEmail(emailNorm);
-      if (byEmail) return bad("email already in use", 409);
-    }
-
     const userId = uuid();
     const secretHash = await sha256(secret);
-    const user: User = { userId, handle, secretHash, email: emailNorm, createdAt: nowSec() };
+    const user: User = { userId, handle, secretHash, createdAt: nowSec() };
     const apiKey = uuid();
 
-    const tx = kv.atomic()
+    const ok = await kv.atomic()
       .check({ key: kUserByHandle(handle), versionstamp: null })
       .set(kUserByHandle(handle), userId)
       .set(kUser(userId), user)
-      .set(kApiKey(apiKey), userId);
-
-    if (emailNorm) tx.check({ key: kUserByEmail(emailNorm), versionstamp: null }).set(kUserByEmail(emailNorm), userId);
-
-    const ok = await tx.commit();
+      .set(kApiKey(apiKey), userId)
+      .commit();
     if (!ok.ok) return bad("could not create user", 409);
     return json(200, { userId, apiKey, handle });
   }
 
   if (pathname === "/api/login" && req.method === "POST") {
     const b = await req.json().catch(()=> ({}));
-    let { handle, email, secret } = b;
-    if ((!handle && !email) || !secret) return bad("handle/email and secret required");
-    let u: User | null = null;
-    if (handle) u = await getUserByHandle(String(handle));
-    else if (email) u = await getUserByEmail(String(email).toLowerCase().trim());
+    let { handle, secret } = b;
+    if (!handle || !secret) return bad("handle and secret required");
+    const u = await getUserByHandle(String(handle));
     if (!u) return bad("no such user", 404);
     const ok = (await sha256(secret)) === u.secretHash;
     if (!ok) return bad("invalid credentials", 401);
@@ -192,19 +180,15 @@ Deno.serve(async (req) => {
     };
     await kv.set(kPending(claimId), p);
 
-    // Record a "send" for the sender (for history) WITHOUT touching their balance
+    // Record a "send" for the sender (history only) WITHOUT touching their balance
     const ts = nowSec();
-    const txSend: Txn = {
-      id:`send:${claimId}`,
-      userId: me.userId,
-      kind: "debit",
-      amount: p.amount,
-      currency: p.currency,
+    await recordTx({
+      id:`send:${claimId}`, userId: me.userId, kind: "debit",
+      amount: p.amount, currency: p.currency,
       note: p.note || `Payment link created`,
       counterpartyHandle: toLabel ? String(toLabel) : "",
       ts,
-    };
-    await recordTx(txSend);
+    });
 
     const link = `${url.origin}/?claim=${encodeURIComponent(claimId)}`;
     return json(200, { claimId, url: link });
@@ -230,20 +214,11 @@ Deno.serve(async (req) => {
     await creditBalance(me.userId, p.currency, +p.amount);
 
     const ts = nowSec();
-    // Receiver gets a credit txn
-    const txCredit: Txn = {
-      id:`credit:${claimId}`,
-      userId: me.userId,
-      kind:"credit",
-      amount:p.amount,
-      currency:p.currency,
-      note:p.note || `From @${fromHandle}`,
-      counterpartyHandle: fromHandle,
-      ts,
-    };
-    await recordTx(txCredit);
-
-    // Optional: also mark a "completed" send entry for the sender? (Already added at /api/link time.)
+    await recordTx({
+      id:`credit:${claimId}`, userId: me.userId, kind:"credit",
+      amount:p.amount, currency:p.currency,
+      note:p.note || `From @${fromHandle}`, counterpartyHandle: fromHandle, ts,
+    });
 
     return json(200, { ok:true, credited:{ amount:p.amount, currency:p.currency }, from: fromHandle });
   }
