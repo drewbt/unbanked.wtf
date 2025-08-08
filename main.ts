@@ -1,4 +1,4 @@
-// Unbanked — recipient-locked claims + mint-on-claim + single Authenticate + TX logging
+// Unbanked — mobile-scroll + KV history + username audit logs + single Authenticate
 // Deno Deploy entrypoint
 
 const kv = await Deno.openKv();
@@ -26,6 +26,7 @@ type Pending = {
 type Txn = {
   id: string;
   userId: string;
+  userHandle: string;      // added for convenience when reading raw KV
   kind: "credit" | "debit";
   amount: number;
   currency: string;
@@ -55,24 +56,27 @@ function json(status: number, body: unknown, headers: HeadersInit = {}) {
 }
 function bad(msg: string, status=400){ return json(status, { error: msg }); }
 
-// --------- Audit logging ---------
+// --------- Audit logging (goes to Deno Deploy logs) ---------
 function audit(event: string, data: Record<string, unknown> = {}){
-  // All TX-related and auth events printed to Deno Deploy logs
+  // Printed JSON lines are visible in Deploy logs; not a database (see notes below).
   console.log(JSON.stringify({ ts: nowSec(), evt: event, ...data }));
 }
 
-// Lookups / auth
+// Lookups / auth helpers
 async function getUserByHandle(handle: string): Promise<User|null> {
   const id = await kv.get<string>(kUserByHandle(handle));
   if (!id.value) return null;
   const u = await kv.get<User>(kUser(id.value));
   return u.value ?? null;
 }
+async function getUserById(userId: string): Promise<User|null> {
+  const u = await kv.get<User>(kUser(userId));
+  return u.value ?? null;
+}
 async function getUserByApiKey(apiKey: string): Promise<User|null> {
   const uid = await kv.get<string>(kApiKey(apiKey));
   if (!uid.value) return null;
-  const u = await kv.get<User>(kUser(uid.value));
-  return u.value ?? null;
+  return await getUserById(uid.value);
 }
 async function authUser(req: Request){
   const a = req.headers.get("authorization") || "";
@@ -80,7 +84,7 @@ async function authUser(req: Request){
   return token ? getUserByApiKey(token) : null;
 }
 
-// Balance + TX helpers
+// Balance + TX helpers (KV is the source of truth; clients fetch on demand)
 async function creditBalance(userId: string, cur: string, amount: number) {
   const key = kBalance(userId, cur);
   for (let i=0;i<8;i++){
@@ -93,8 +97,12 @@ async function creditBalance(userId: string, cur: string, amount: number) {
   throw new Error("balance contention");
 }
 async function recordTx(t: Txn){
-  await kv.set(kTx(t.userId, t.ts, t.id), t);
-  audit("tx.recorded", { userId: t.userId, kind: t.kind, amount: t.amount, currency: t.currency, note: t.note, counterparty: t.counterpartyHandle, txId: t.id, ts: t.ts });
+  await kv.set(kTx(t.userId, t.ts, t.id), t); // Stored in KV → consistent across devices
+  audit("tx.recorded", {
+    userId: t.userId, userHandle: t.userHandle, kind: t.kind,
+    amount: t.amount, currency: t.currency, note: t.note,
+    counterparty: t.counterpartyHandle, txId: t.id, ts: t.ts
+  });
 }
 
 // HTTP
@@ -184,13 +192,13 @@ Deno.serve(async (req) => {
     // Sender history only (no debit of balance)
     const ts = nowSec();
     await recordTx({
-      id:`send:${claimId}`, userId: me.userId, kind: "debit",
+      id:`send:${claimId}`, userId: me.userId, userHandle: me.handle, kind: "debit",
       amount: p.amount, currency: p.currency,
       note: p.note || `Payment link created for @${to}`,
       counterpartyHandle: to, ts,
     });
 
-    audit("link.created", { claimId, fromUserId: me.userId, toHandle: p.toHandle, amount: p.amount, currency: p.currency });
+    audit("link.created", { claimId, fromUserId: me.userId, fromHandle: me.handle, toHandle: p.toHandle, amount: p.amount, currency: p.currency });
     const link = `${url.origin}/?claim=${encodeURIComponent(claimId)}`;
     return json(200, { claimId, url: link });
   }
@@ -211,21 +219,20 @@ Deno.serve(async (req) => {
     if (p.fromUserId === me.userId) return bad("cannot claim your own link", 400);
     if (p.toHandle !== meHandleLower) return bad(`link reserved for @${p.toHandle}`, 403);
 
-    // Credit receiver (mint-on-claim). Sender's balance never decreases.
     await kv.set(kPending(claimId), { ...p, claimedAt: nowSec(), claimedBy: me.userId });
     await creditBalance(me.userId, p.currency, +p.amount);
 
-    const fromU = await kv.get<User>(kUser(p.fromUserId));
-    const fromHandle = fromU.value?.handle || "sender";
+    const fromU = await getUserById(p.fromUserId);
+    const fromHandle = fromU?.handle || "sender";
     const ts = nowSec();
 
     await recordTx({
-      id:`credit:${claimId}`, userId: me.userId, kind:"credit",
+      id:`credit:${claimId}`, userId: me.userId, userHandle: me.handle, kind:"credit",
       amount:p.amount, currency:p.currency,
       note:p.note || `From @${fromHandle}`, counterpartyHandle: fromHandle, ts,
     });
 
-    audit("link.claimed", { claimId, byUserId: me.userId, toHandle: meHandleLower, amount: p.amount, currency: p.currency });
+    audit("link.claimed", { claimId, byUserId: me.userId, byHandle: me.handle, toHandle: meHandleLower, amount: p.amount, currency: p.currency, fromHandle });
     return json(200, { ok:true, credited:{ amount:p.amount, currency:p.currency }, from: fromHandle });
   }
 
@@ -237,6 +244,7 @@ Deno.serve(async (req) => {
     const offset = Math.max(0, Number(url.searchParams.get("offset") || "0"));
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") || "100")));
 
+    // Read user's TX directly from KV so history is device-agnostic
     const all: Txn[] = [];
     for await (const e of kv.list<Txn>({ prefix: kTxPrefix(me.userId) })) {
       if (e.value) all.push(e.value);
@@ -246,6 +254,7 @@ Deno.serve(async (req) => {
     const hasOlder = offset + limit < all.length;
     const hasNewer = offset > 0;
 
+    // Current balances from KV
     const balances: Record<string, number> = {};
     for await (const e of kv.list<number>({ prefix: ["balance", me.userId] })) {
       const cur = String(e.key[2]);
