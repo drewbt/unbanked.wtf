@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <style>
-    :root { --bg:#0b0b0c; --fg:#e9e9ea; --muted:#9a9aa1; --card:#121214; --line:#2a2a2d; --accent:#8fd3ff; --ok:#3ddc97; --warn:#f5a524; --err:#ff5d5d; }
+    :root { --bg:#0b0b0c; --fg:#e9e9ea; --muted:#9a9aa1; --card:#121214; --line:#2a2a2d; --ok:#3ddc97; --warn:#f5a524; --err:#ff5d5d; }
     *{ box-sizing:border-box }
     html,body{ min-height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
     body{ overflow:auto }
@@ -24,12 +24,10 @@
     table{ width:100%; border-collapse:collapse; border:1px solid var(--line); border-radius:10px; overflow:hidden }
     th,td{ padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; font-size:14px; white-space:nowrap }
     th{ background:#15161a; color:#cfd3da }
-    .right{ text-align:right }
-    .ok{ color:var(--ok) } .warn{ color:var(--warn) } .err{ color:var(--err) }
-    .tabs{ display:flex; gap:8px; }
-    .tab{ padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:#0f1116; cursor:pointer; }
+    .right{ text-align:right } .ok{ color:var(--ok) } .warn{ color:var(--warn) } .err{ color:var(--err) }
+    .tabs{ display:flex; gap:8px } .tab{ padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:#0f1116; cursor:pointer }
     .tab.active{ outline:2px solid #2b3a46 }
-    .pager{ display:flex; gap:10px; align-items:center; justify-content:flex-end; }
+    .pager{ display:flex; gap:10px; align-items:center; justify-content:flex-end }
     @media (max-width:520px){ html,body{ font-size:14px } .wrap{ padding:12px } th,td{ font-size:12px } }
   </style>
 </head>
@@ -39,17 +37,17 @@
     <div id="authScreen" class="card" style="display:none">
       <header>
         <strong>Unbanked</strong>
-        <span class="tiny muted">Recipient-locked claims • Mint-on-claim</span>
+        <span class="tiny muted">Recipient-locked • Mint-on-claim</span>
       </header>
       <div class="row">
         <h3 style="margin:0 0 6px 0">Welcome</h3>
         <div class="row">
           <label>Handle</label>
-          <input id="authHandle" placeholder="yourname (letters, numbers, _.-)" autocomplete="username">
+          <input id="authHandle" autocomplete="username" placeholder="yourname (letters, numbers, _.-)">
         </div>
         <div class="row">
           <label>Secret</label>
-          <input id="authSecret" type="password" placeholder="minimum 6 chars" autocomplete="current-password">
+          <input id="authSecret" type="password" autocomplete="current-password" placeholder="minimum 6 chars">
         </div>
         <div class="row tiny">
           <label class="row-inline" style="gap:8px">
@@ -170,13 +168,17 @@
     function uiAuth(){ const k=localStorage.getItem("ub_apiKey"); if(!k){ showAuth(); return; } who.textContent="@"+(localStorage.getItem("ub_handle")||"anonymous"); showApp(); refreshAll(); }
     function authHeaders(){ const k=localStorage.getItem("ub_apiKey")||""; return k? {authorization:"Bearer "+k,"content-type":"application/json"} : {"content-type":"application/json"}; }
 
+    // API
     async function apiAuthenticate(handle, secret, acceptedDisclaimer){
       const r=await fetch("/api/authenticate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({handle,secret,acceptedDisclaimer})});
       const j=await r.json(); if(!r.ok) throw new Error(j.error||"authenticate failed"); return j;
     }
     async function apiLink(payload){
       const r=await fetch("/api/link",{method:"POST",headers:authHeaders(),body:JSON.stringify(payload)});
-      const j=await r.json(); if(!r.ok) throw new Error(j.error||"link failed"); return j;
+      const txt = await r.text();
+      let j; try { j = JSON.parse(txt); } catch { j = { error: txt || "link failed" }; }
+      if(!r.ok) throw new Error(j.error||"link failed");
+      return j;
     }
     async function apiClaim(id){
       const r=await fetch("/api/claim",{method:"POST",headers:authHeaders(),body:JSON.stringify({claimId:id})});
@@ -187,8 +189,10 @@
       const j=await r.json(); if(!r.ok) throw new Error(j.error||"history failed"); return j;
     }
 
+    // state
     let lastBalances = {}; let lastTx = []; let page = { offset: 0, limit: 100, total: 0, hasOlder: false, hasNewer: false }; let currentFilter = "all";
 
+    // render
     function renderBalancesLine(){
       const entries = Object.entries(lastBalances).filter(([,v])=>Math.abs(v) > 1e-12);
       const parts = entries.sort((a,b)=> a[0].localeCompare(b[0])).map(([cur,val]) => `${fmt2(val)} ${cur}`);
@@ -210,6 +214,7 @@
       totalsEl.textContent = parts.length ? parts.join("  ·  ") : "—";
     }
 
+    // interactions
     currencyEl.addEventListener("change",()=>{ customCurEl.style.display = (currencyEl.value==="CUSTOM")?"inline-block":"none"; });
     tabs.forEach(tab => tab.addEventListener("click", ()=>{ tabs.forEach(t=>t.classList.remove("active")); tab.classList.add("active"); currentFilter = tab.getAttribute("data-filter") || "all"; renderHistory(); }));
 
@@ -217,26 +222,36 @@
       const h=(authHandle.value||"").trim();
       const s=authSecret.value;
       if (!h || !s) { toast(authMsg,"Enter handle and secret.","err"); return; }
-      const accepted = !!acceptDisclaimer.checked; // required only if creating a new account
-      try { const a = await apiAuthenticate(h,s,accepted); setAuth(a); showApp(); }
+      try { const a = await apiAuthenticate(h,s,!!acceptDisclaimer.checked); setAuth(a); showApp(); }
       catch(err){ toast(authMsg, String(err.message||err), "err"); }
     });
 
     document.addEventListener("keydown",(e)=>{ if(e.key==="Enter" && authScreen.style.display!=="none"){ btnAuthenticate.click(); }});
 
     makeLinkBtn.addEventListener("click", async ()=>{
-      if (!localStorage.getItem("ub_apiKey")) { showAuth(); return; }
+      if (!localStorage.getItem("ub_apiKey")) { toast(linkMsg,"You are not signed in.","err"); showAuth(); return; }
       let toHandle = (payToEl.value||"").trim();
       if (toHandle.startsWith("@")) toHandle = toHandle.slice(1);
-      if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(toHandle)){ toast(linkMsg,"Enter a valid handle (letters, numbers, _ . -)", "err"); return; }
-      const amount = Number((amountEl.value||"").trim());
+      // accept commas in amount (mobile locales)
+      const amtStr = (amountEl.value||"").trim().replace(/\s+/g,"").replace(",",".");
+      const amount = Number(amtStr);
       const currency = chosenCurrency();
       const note = (noteEl.value||"").trim();
-      if (!isFinite(amount) || amount<=0){ toast(linkMsg,"Enter a valid amount > 0","err"); return; }
+
+      if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(toHandle)){ toast(linkMsg,"Enter a valid handle (letters, numbers, _ . -)", "err"); return; }
+      if (!isFinite(amount) || amount<=0){ toast(linkMsg,"Enter a valid amount > 0 (supports 12,5)", "err"); return; }
+
+      makeLinkBtn.disabled = true;
+      toast(linkMsg,"Creating link…","muted");
       try {
         const { url } = await apiLink({ toHandle, amount, currency, note });
-        linkOut.value = url; linkArea.style.display = "grid"; toast(linkMsg, `Link locked to @${toHandle}.`, "muted");
-      } catch(e){ toast(linkMsg, (e && e.message) ? e.message : "Could not create link", "err"); }
+        linkOut.value = url; linkArea.style.display = "grid";
+        toast(linkMsg, `Link locked to @${toHandle}. Share it with them.`, "muted");
+      } catch(e){
+        toast(linkMsg, String(e.message||e), "err");
+      } finally {
+        makeLinkBtn.disabled = false;
+      }
     });
 
     copyBtn.addEventListener("click", async ()=>{ try{ await navigator.clipboard.writeText(linkOut.value); toast(linkMsg,"Copied","ok"); } catch{ linkOut.select(); document.execCommand("copy"); toast(linkMsg,"Copied (fallback)","ok"); } });
@@ -246,6 +261,7 @@
     older.addEventListener("click", async (e)=>{ e.preventDefault(); if (!page.hasOlder) return; await loadHistory(page.offset + page.limit); });
     refreshBtn.addEventListener("click", async (e)=>{ e.preventDefault(); await refreshAll(); });
 
+    // loaders
     async function loadBalances(){ const { balances } = await apiHistory(0, 1); lastBalances = balances || {}; renderBalancesLine(); }
     async function loadHistory(offset=0){
       const res = await apiHistory(offset, 100);
@@ -257,9 +273,12 @@
     }
     async function refreshAll(){ if (!localStorage.getItem("ub_apiKey")) { showAuth(); return; } await loadBalances(); await loadHistory(page.offset || 0); }
 
+    // boot
     (async function boot(){
       if (!localStorage.getItem("ub_apiKey")) showAuth(); else showApp();
       uiAuth();
+
+      // auto-claim if present
       const claim = new URL(location.href).searchParams.get("claim");
       if (claim && localStorage.getItem("ub_apiKey")){
         try {
