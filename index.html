@@ -3,59 +3,100 @@
 <head>
   <meta charset="utf-8" />
   <title>Unbanked</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <style>
     :root { --bg:#0b0b0c; --fg:#e9e9ea; --muted:#9a9aa1; --card:#121214; --line:#2a2a2d; --accent:#8fd3ff; --ok:#3ddc97; --warn:#f5a524; --err:#ff5d5d; }
     *{ box-sizing:border-box }
-    html,body{ height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif }
-    a{ color:var(--accent); text-decoration:none } a:hover{text-decoration:underline}
-    .screen{ height:100vh; width:100vw; display:grid; place-items:center; padding:16px; overflow:hidden }
-    .card{ width:min(980px,96vw); border:1px solid var(--line); background:var(--card); border-radius:14px; padding:18px; display:grid; gap:12px }
-    header{ display:flex; align-items:center; justify-content:space-between; gap:12px }
-    .row{ display:grid; gap:8px }
-    .row-inline{ display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+    html,body{ height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden }
+    /* Two screens, each fits the viewport. No page scroll. */
+    .screen{ height:100vh; width:100vw; display:grid; place-items:center; padding:12px }
+    .card{ width:min(960px,96vw); height:min(96vh,680px); border:1px solid var(--line); background:var(--card); border-radius:14px; padding:12px; display:grid; grid-template-rows:auto 1fr auto; gap:10px }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:40px }
+    .row{ display:grid; gap:6px }
+    .row-inline{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
     .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:#0f1116; font-weight:600 }
     .muted{ color:var(--muted) } .tiny{ font-size:12px } .mono{ font-family: ui-monospace, Menlo, Consolas, monospace; }
-    label{ display:block; font-size:12px; color:var(--muted); margin-bottom:4px }
-    input,select,button{ padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:#111115; color:var(--fg); outline:none }
+    label{ display:block; font-size:12px; color:var(--muted); margin-bottom:2px }
+    input,select,button{ padding:9px 10px; border-radius:10px; border:1px solid var(--line); background:#111115; color:var(--fg); outline:none }
     button{ cursor:pointer; background:#151922; font-weight:600 } button.primary{ background:#16202a; border-color:#2b3a46 }
-    .copybox{ display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; border:1px dashed var(--line); padding:10px; border-radius:12px; background:#101017 }
+    .copybox{ display:grid; grid-template-columns:1fr auto; gap:6px; align-items:center; border:1px dashed var(--line); padding:8px; border-radius:12px; background:#101017 }
     table{ width:100%; border-collapse:collapse; border:1px solid var(--line); border-radius:10px; overflow:hidden }
-    th,td{ padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; font-size:14px; white-space:nowrap }
+    th,td{ padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; font-size:13px; white-space:nowrap }
     th{ background:#15161a; color:#cfd3da }
     .right{ text-align:right }
     .ok{ color:var(--ok) } .warn{ color:var(--warn) } .err{ color:var(--err) }
-    .tabs{ display:flex; gap:8px; }
+    .tabs{ display:flex; gap:6px; }
     .tab{ padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:#0f1116; cursor:pointer; }
     .tab.active{ outline:2px solid #2b3a46 }
     .pager{ display:flex; gap:10px; align-items:center; justify-content:flex-end; }
-    @media (max-width:540px){ header{flex-direction:column; align-items:stretch} }
+    /* Compact mobile typography to avoid page scroll */
+    @media (max-width:520px){
+      html,body{ font-size:14px }
+      .card{ height:92vh; padding:10px }
+      th,td{ font-size:12px }
+    }
   </style>
 </head>
 <body>
-  <div class="screen">
-    <div class="card">
+  <!-- AUTH SCREEN (shown when not logged in) -->
+  <div id="authScreen" class="screen" style="display:none">
+    <div class="card" style="grid-template-rows: auto 1fr auto;">
       <header>
-        <div class="row" style="flex:1">
-          <div class="row-inline">
-            <strong>Unbanked</strong>
-            <span class="muted">Signed in as</span>
-            <span id="who" class="pill">@anonymous</span>
-            <a id="logout" href="#" class="pill warn" title="Log out">Logout</a>
-          </div>
-          <div class="row-inline tiny">
-            <span class="muted">Balances:</span>
-            <span id="balancesLine" class="mono">—</span>
+        <strong>Unbanked</strong>
+        <span class="tiny muted">Mint-on-send • No-expiry links</span>
+      </header>
+      <div class="row" style="align-content:start">
+        <h3 style="margin:0 0 6px 0">Welcome</h3>
+        <div class="row">
+          <label>Handle</label>
+          <input id="authHandle" placeholder="yourname">
+        </div>
+        <div class="row">
+          <label>Secret</label>
+          <input id="authSecret" type="password" placeholder="minimum 6 chars">
+        </div>
+        <div class="row tiny">
+          <label class="row-inline" style="gap:8px">
+            <input id="acceptDisclaimer" type="checkbox">
+            <span>I have read and accept the disclaimer.</span>
+          </label>
+          <div class="muted" style="border:1px solid var(--line); border-radius:10px; padding:8px">
+            <b>Disclaimer</b><br>
+            Unbanked transfers are a private agreement between sender and receiver. Only send to people or entities who have agreed to accept Unbanked transfers. Unbanked is not a regulated financial institution and does not guarantee redemption or value. Confirm acceptance <b>before</b> sending for goods, services, or anything of value.
           </div>
         </div>
-        <div class="row-inline">
-          <span id="selectedBalance" class="pill mono">ZAR 0.00</span>
+        <div class="row-inline" style="justify-content:space-between">
+          <button id="btnSignup" class="primary">Sign up</button>
+          <button id="btnLogin">Log in</button>
+        </div>
+        <div id="authMsg" class="tiny muted"></div>
+      </div>
+      <footer class="row-inline" style="justify-content:space-between">
+        <span class="tiny muted">No emails required • Works offline after login</span>
+        <span></span>
+      </footer>
+    </div>
+  </div>
+
+  <!-- APP SCREEN (shown when logged in) -->
+  <div id="appScreen" class="screen" style="display:none">
+    <div class="card">
+      <header>
+        <div class="row-inline" style="gap:10px; flex-wrap:nowrap; overflow:hidden">
+          <strong>Unbanked</strong>
+          <span class="muted">Signed in as</span>
+          <span id="who" class="pill mono" style="max-width:48vw; overflow:hidden; text-overflow:ellipsis"></span>
+          <a id="logout" href="#" class="pill warn" title="Log out">Logout</a>
+        </div>
+        <div class="row-inline tiny" style="justify-self:end; max-width:52vw; overflow:hidden; text-overflow:ellipsis">
+          <span class="muted">Balances:</span>
+          <span id="balancesLine" class="mono">—</span>
         </div>
       </header>
 
-      <!-- Payment (stacked; currency moved below amount) -->
-      <div class="row">
+      <div class="row" style="grid-template-rows:auto auto auto 1fr; overflow:hidden">
+        <!-- Payment (stacked; currency below amount) -->
         <div class="row">
           <label for="payTo">Pay</label>
           <input id="payTo" placeholder="Recipient (name or handle)">
@@ -63,286 +104,7 @@
         <div class="row">
           <label for="amount">Amount</label>
           <input id="amount" inputmode="decimal" placeholder="0.00">
-        </div>
-        <div class="row-inline tiny muted">
-          <span>Currency</span>
-          <select id="currency">
-            <option>ZAR</option><option>USD</option><option>EUR</option><option>GBP</option>
-            <option>BTC</option><option>ETH</option><option value="CUSTOM">Custom…</option>
-          </select>
-          <input id="customCurrency" placeholder="CODE" maxlength="6" style="width:96px; display:none">
-        </div>
-        <div class="row">
-          <label for="note">For</label>
-          <input id="note" placeholder="What is this for? (optional)">
-        </div>
-        <div class="row">
-          <button id="makeLink" class="primary">Generate Payment Link</button>
-          <div id="linkArea" class="copybox" style="display:none;">
-            <input id="linkOut" readonly class="mono" />
-            <button id="copyBtn" title="Copy link">Copy</button>
-            <div id="linkMsg" class="tiny muted" style="grid-column:1 / -1;"></div>
-          </div>
-          <div id="claimMsg" class="tiny muted" aria-live="polite"></div>
-        </div>
-      </div>
-
-      <!-- History with tabs + pagination -->
-      <div class="row">
-        <div class="row-inline" style="justify-content:space-between">
-          <strong>History</strong>
-          <span id="totals" class="tiny muted mono">—</span>
-        </div>
-        <div class="tabs">
-          <div class="tab active" data-filter="all">All</div>
-          <div class="tab" data-filter="credit">Received</div>
-          <div class="tab" data-filter="debit">Sent</div>
-        </div>
-        <div style="max-height:34vh; overflow:auto">
-          <table id="hist">
-            <thead>
-              <tr>
-                <th>Date</th><th>Type</th><th>Counterparty</th><th>Note</th><th>Cur</th><th class="right">Amount</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <div class="pager">
-          <a href="#" id="newer" class="tiny">← Newer</a>
-          <span class="tiny muted" id="pageInfo"></span>
-          <a href="#" id="older" class="tiny">Older →</a>
-        </div>
-      </div>
-
-      <footer class="row-inline" style="justify-content:space-between">
-        <span class="tiny muted">Mint-on-send • No-expiry links • KV-backed</span>
-        <a class="tiny" href="#" id="refresh">Refresh</a>
-      </footer>
-    </div>
-  </div>
-
-  <!-- Auth modal -->
-  <div id="authModal" class="modal" style="display:none; position:fixed; inset:0; place-items:center; background:rgba(0,0,0,0.55);">
-    <div class="sheet" style="width:min(480px,92vw); background:#121214; border:1px solid #2a2a2d; border-radius:14px; padding:16px; display:grid; gap:10px">
-      <h3 style="margin:0">Welcome to Unbanked</h3>
-      <div class="tiny muted">Create an account or log in. Currency is minted to receivers on claim.</div>
-
-      <div class="row"><label>Handle</label><input id="authHandle" placeholder="yourname"></div>
-      <div class="row"><label>Secret</label><input id="authSecret" type="password" placeholder="minimum 6 chars"></div>
-
-      <div class="row tiny">
-        <label class="row-inline" style="gap:8px">
-          <input id="acceptDisclaimer" type="checkbox">
-          <span>I have read and accept the disclaimer.</span>
-        </label>
-        <div class="muted" style="border:1px solid #2a2a2d; border-radius:10px; padding:8px">
-          <b>Disclaimer</b><br>
-          Unbanked transfers are a private agreement between sender and receiver. Only send to people or entities who have agreed to accept Unbanked transfers. Unbanked is not a regulated financial institution and does not guarantee redemption or value. Confirm acceptance <b>before</b> sending for goods, services, or anything of value.
-        </div>
-      </div>
-
-      <div class="row-inline" style="justify-content:space-between">
-        <button id="btnSignup" class="primary">Sign up</button>
-        <button id="btnLogin">Log in</button>
-      </div>
-      <div id="authMsg" class="tiny muted"></div>
-    </div>
-  </div>
-
-  <script>
-    // ------- DOM -------
-    const $ = id => document.getElementById(id);
-    const who = $("who");
-    const balancesLine = $("balancesLine");
-    const selectedBalance = $("selectedBalance");
-    const currencyEl = $("currency");
-    const customCurEl = $("customCurrency");
-    const payToEl = $("payTo");
-    const amountEl = $("amount");
-    const noteEl = $("note");
-    const makeLinkBtn = $("makeLink");
-    const linkArea = $("linkArea");
-    const linkOut = $("linkOut");
-    const copyBtn = $("copyBtn");
-    const linkMsg = $("linkMsg");
-    const claimMsg = $("claimMsg");
-    const histBody = $("hist").querySelector("tbody");
-    const totalsEl = $("totals");
-    const refreshBtn = $("refresh");
-    const logoutBtn = $("logout");
-    const tabs = Array.from(document.querySelectorAll(".tab"));
-    const newer = $("newer");
-    const older = $("older");
-    const pageInfo = $("pageInfo");
-
-    const authModal = $("authModal");
-    const authHandle = $("authHandle");
-    const authSecret = $("authSecret");
-    const acceptDisclaimer = $("acceptDisclaimer");
-    const btnSignup = $("btnSignup");
-    const btnLogin = $("btnLogin");
-    const authMsg = $("authMsg");
-
-    // ------- helpers -------
-    function openModal(m){ m.style.display="grid"; }
-    function closeModal(m){ m.style.display="none"; }
-    function toast(el,msg,cls="muted"){ el.textContent=msg; el.className="tiny "+cls; }
-    function fmt2(n){ return Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
-    function chosenCurrency(){
-      const sel = currencyEl.value;
-      if (sel==="CUSTOM"){ const c=(customCurEl.value||"").trim().toUpperCase(); return c||"XXX"; }
-      return sel;
-    }
-    function ymd(ts){ const d=new Date(ts*1000); return d.toLocaleString(undefined,{year:"2-digit",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}); }
-    function setAuth(a){
-      if (a){ localStorage.setItem("ub_apiKey",a.apiKey); localStorage.setItem("ub_userId",a.userId); localStorage.setItem("ub_handle",a.handle); }
-      else { localStorage.removeItem("ub_apiKey"); localStorage.removeItem("ub_userId"); localStorage.removeItem("ub_handle"); }
-      uiAuth();
-    }
-    function uiAuth(){ who.textContent="@"+(localStorage.getItem("ub_handle")||"anonymous"); refreshAll(); }
-    function authHeaders(){ const k=localStorage.getItem("ub_apiKey")||""; return k? {authorization:"Bearer "+k,"content-type":"application/json"} : {"content-type":"application/json"}; }
-    function needAuth(){ const ok=!!localStorage.getItem("ub_apiKey"); if(!ok) openModal(authModal); return !ok; }
-
-    // ------- API -------
-    async function apiSignup(handle, secret){
-      const r=await fetch("/api/signup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({handle,secret,acceptedDisclaimer:true})});
-      const j=await r.json(); if(!r.ok) throw new Error(j.error||"signup failed"); return j;
-    }
-    async function apiLogin({handle,secret}){
-      const r=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({handle,secret})});
-      const j=await r.json(); if(!r.ok) throw new Error(j.error||"login failed"); return j;
-    }
-    async function apiLink(payload){
-      const r=await fetch("/api/link",{method:"POST",headers:authHeaders(),body:JSON.stringify(payload)});
-      const j=await r.json(); if(!r.ok) throw new Error(j.error||"link failed"); return j;
-    }
-    async function apiClaim(id){
-      const r=await fetch("/api/claim",{method:"POST",headers:authHeaders(),body:JSON.stringify({claimId:id})});
-      const j=await r.json(); if(!r.ok) throw new Error(j.error||"claim failed"); return j;
-    }
-    async function apiHistory(offset=0, limit=100){
-      const r=await fetch(`/api/history?offset=${offset}&limit=${limit}`,{method:"GET",headers:authHeaders()});
-      const j=await r.json(); if(!r.ok) throw new Error(j.error||"history failed"); return j;
-    }
-
-    // ------- state -------
-    let lastBalances = {};
-    let lastTx = [];
-    let page = { offset: 0, limit: 100, total: 0, hasOlder: false, hasNewer: false };
-    let currentFilter = "all";
-
-    // ------- rendering -------
-    function renderBalancesLine(){
-      const entries = Object.entries(lastBalances).filter(([,v])=>Math.abs(v) > 1e-12);
-      if (!entries.length) { balancesLine.textContent = "—"; return; }
-      const parts = entries.sort((a,b)=> a[0].localeCompare(b[0])).map(([cur,val]) => `${fmt2(val)} ${cur}`);
-      balancesLine.textContent = parts.join(" / ");
-      // also update selectedBalance display for chosen currency
-      const cur = chosenCurrency();
-      const bal = +((lastBalances && lastBalances[cur]) ?? 0);
-      selectedBalance.textContent = `${cur} ${fmt2(bal)}`;
-    }
-
-    function renderHistory(){
-      const rows = (lastTx||[]).filter(t => currentFilter==="all" ? true : t.kind===currentFilter);
-      histBody.innerHTML = rows.map(t=>{
-        const sign = t.kind==="credit"? "+":"−";
-        const cls = t.kind==="credit"? "ok":"err";
-        const cp = t.counterpartyHandle ? ("@"+t.counterpartyHandle) : "—";
-        const note = t.note ? t.note.replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s])) : "";
-        return `<tr><td>${ymd(t.ts)}</td><td class="${cls}">${t.kind}</td><td>${cp}</td><td>${note}</td><td>${t.currency}</td><td class="right ${cls}">${sign}${fmt2(t.amount)}</td></tr>`;
-      }).join("");
-      pageInfo.textContent = `Showing ${page.offset + 1}–${Math.min(page.offset + page.limit, page.total)} of ${page.total}`;
-      newer.style.visibility = page.hasNewer ? "visible" : "hidden";
-      older.style.visibility = page.hasOlder ? "visible" : "hidden";
-      // Totals line shows current point-in-time balances
-      const parts = Object.keys(lastBalances).sort().map(c => `${c}:${fmt2(lastBalances[c])}`);
-      totalsEl.textContent = parts.length ? parts.join("  ·  ") : "—";
-    }
-
-    // ------- actions -------
-    currencyEl.addEventListener("change",()=>{ customCurEl.style.display = (currencyEl.value==="CUSTOM")?"inline-block":"none"; renderBalancesLine(); });
-    customCurEl.addEventListener("input", renderBalancesLine);
-
-    tabs.forEach(tab => tab.addEventListener("click", ()=>{
-      tabs.forEach(t=>t.classList.remove("active"));
-      tab.classList.add("active");
-      currentFilter = tab.getAttribute("data-filter") || "all";
-      renderHistory();
-    }));
-
-    makeLinkBtn.addEventListener("click", async ()=>{
-      if (needAuth()) return;
-      const toLabel = payToEl.value.trim();
-      const amount = Number((amountEl.value||"").trim());
-      const currency = chosenCurrency();
-      const note = noteEl.value.trim();
-      if (!isFinite(amount) || amount<=0){ toast(linkMsg,"Enter a valid amount > 0","err"); return; }
-      try { const { url } = await apiLink({ toLabel, amount, currency, note });
-        linkOut.value = url; linkArea.style.display = "grid"; toast(linkMsg,"Share this link with the recipient.","muted");
-      } catch(e){ toast(linkMsg,e.message,"err"); }
-    });
-
-    copyBtn.addEventListener("click", async ()=>{ try{ await navigator.clipboard.writeText(linkOut.value); toast(linkMsg,"Copied","ok"); } catch{ linkOut.select(); document.execCommand("copy"); toast(linkMsg,"Copied (fallback)","ok"); } });
-
-    logoutBtn.addEventListener("click", (e)=>{ e.preventDefault(); setAuth(null); openModal(authModal); });
-
-    btnSignup.addEventListener("click", async ()=>{
-      const h=authHandle.value.trim(); const s=authSecret.value;
-      if (!acceptDisclaimer.checked){ toast(authMsg,"Please accept the disclaimer to continue.","err"); return; }
-      try { const a = await apiSignup(h,s); setAuth(a); closeModal(authModal); }
-      catch(err){ toast(authMsg,err.message,"err"); }
-    });
-
-    btnLogin.addEventListener("click", async ()=>{
-      const h=authHandle.value.trim(); const s=authSecret.value;
-      try { const a=await apiLogin({ handle: h, secret: s }); setAuth(a); closeModal(authModal); }
-      catch(err){ toast(authMsg,err.message,"err"); }
-    });
-
-    newer.addEventListener("click", async (e)=>{ e.preventDefault(); if (!page.hasNewer) return; await loadHistory(Math.max(0, page.offset - page.limit)); });
-    older.addEventListener("click", async (e)=>{ e.preventDefault(); if (!page.hasOlder) return; await loadHistory(page.offset + page.limit); });
-
-    refreshBtn.addEventListener("click", async (e)=>{ e.preventDefault(); await refreshAll(); });
-
-    // ------- loaders -------
-    async function loadBalances(){
-      const { balances } = await apiHistory(0, 1); // cheap way to read balances with any page call
-      lastBalances = balances || {};
-      renderBalancesLine();
-    }
-    async function loadHistory(offset=0){
-      const res = await apiHistory(offset, 100);
-      lastTx = res.tx || [];
-      page = res.page || { offset, limit: 100, total: lastTx.length, hasOlder:false, hasNewer:false };
-      // Make sure balances also refreshed here
-      lastBalances = res.balances || {};
-      renderBalancesLine();
-      renderHistory();
-    }
-    async function refreshAll(){
-      await loadBalances();
-      await loadHistory(page.offset || 0);
-    }
-
-    // ------- boot -------
-    (async function boot(){
-      if (!localStorage.getItem("ub_apiKey")) openModal(authModal);
-      uiAuth();
-      await refreshAll();
-
-      // Auto-claim ?claim=... after auth
-      const claim = new URL(location.href).searchParams.get("claim");
-      if (claim && !needAuth()){
-        try {
-          const res = await apiClaim(claim);
-          toast(claimMsg, `Credited ${res.credited.currency} ${fmt2(res.credited.amount)} from @${res.from}`, "ok");
-          const u=new URL(location.href); u.searchParams.delete("claim"); history.replaceState({}, "", u.toString());
-          await refreshAll();
-        } catch(e){ toast(claimMsg, e.message, "warn"); }
-      }
-    })();
-  </script>
-</body>
-</html>
+          <div class="row-inline tiny muted">
+            <span>Currency</span>
+            <select id="currency">
+              <option>ZAR</option><option>USD</option><option>E
