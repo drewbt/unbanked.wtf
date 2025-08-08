@@ -8,34 +8,35 @@
   <style>
     :root { --bg:#0b0b0c; --fg:#e9e9ea; --muted:#9a9aa1; --card:#121214; --line:#2a2a2d; --accent:#8fd3ff; --ok:#3ddc97; --warn:#f5a524; --err:#ff5d5d; }
     *{ box-sizing:border-box }
-    html,body{ height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden }
-    .screen{ height:100vh; width:100vw; display:grid; place-items:center; padding:12px }
-    .card{ width:min(960px,96vw); height:min(96vh,680px); border:1px solid var(--line); background:var(--card); border-radius:14px; padding:12px; display:grid; grid-template-rows:auto 1fr auto; gap:10px }
-    header{ display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:40px }
-    .row{ display:grid; gap:6px }
+    html,body{ min-height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+    body{ overflow:auto } /* page can scroll on mobile */
+    .wrap{ max-width:980px; margin:0 auto; padding:16px } /* fluid container */
+    .card{ border:1px solid var(--line); background:var(--card); border-radius:14px; padding:14px; display:grid; gap:12px; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:8px }
+    .row{ display:grid; gap:8px }
     .row-inline{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
     .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:#0f1116; font-weight:600 }
     .muted{ color:var(--muted) } .tiny{ font-size:12px } .mono{ font-family: ui-monospace, Menlo, Consolas, monospace; }
     label{ display:block; font-size:12px; color:var(--muted); margin-bottom:2px }
-    input,select,button{ padding:9px 10px; border-radius:10px; border:1px solid var(--line); background:#111115; color:#e9e9ea; outline:none }
+    input,select,button{ padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:#111115; color:#e9e9ea; outline:none }
     button{ cursor:pointer; background:#151922; font-weight:600 } button.primary{ background:#16202a; border-color:#2b3a46 }
-    .copybox{ display:grid; grid-template-columns:1fr auto; gap:6px; align-items:center; border:1px dashed var(--line); padding:8px; border-radius:12px; background:#101017 }
+    .copybox{ display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; border:1px dashed var(--line); padding:8px; border-radius:12px; background:#101017 }
     table{ width:100%; border-collapse:collapse; border:1px solid var(--line); border-radius:10px; overflow:hidden }
-    th,td{ padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; font-size:13px; white-space:nowrap }
+    th,td{ padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; font-size:14px; white-space:nowrap }
     th{ background:#15161a; color:#cfd3da }
     .right{ text-align:right }
     .ok{ color:var(--ok) } .warn{ color:var(--warn) } .err{ color:var(--err) }
-    .tabs{ display:flex; gap:6px; }
+    .tabs{ display:flex; gap:8px; }
     .tab{ padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:#0f1116; cursor:pointer; }
     .tab.active{ outline:2px solid #2b3a46 }
     .pager{ display:flex; gap:10px; align-items:center; justify-content:flex-end; }
-    @media (max-width:520px){ html,body{ font-size:14px } .card{ height:92vh; padding:10px } th,td{ font-size:12px } }
+    @media (max-width:520px){ html,body{ font-size:14px } .wrap{ padding:12px } th,td{ font-size:12px } }
   </style>
 </head>
 <body>
-  <!-- AUTH SCREEN -->
-  <div id="authScreen" class="screen">
-    <div class="card">
+  <div class="wrap">
+    <!-- AUTH SCREEN -->
+    <div id="authScreen" class="card" style="display:none">
       <header>
         <strong>Unbanked</strong>
         <span class="tiny muted">Recipient-locked claims • Mint-on-claim</span>
@@ -65,15 +66,10 @@
         </div>
         <div id="authMsg" class="tiny muted"></div>
       </div>
-      <footer class="row-inline" style="justify-content:space-between">
-        <span class="tiny muted">No emails • Works offline after login</span><span></span>
-      </footer>
     </div>
-  </div>
 
-  <!-- APP SCREEN -->
-  <div id="appScreen" class="screen" style="display:none">
-    <div class="card">
+    <!-- APP SCREEN -->
+    <div id="appScreen" class="card" style="display:none">
       <header>
         <div class="row-inline" style="gap:10px; flex-wrap:nowrap; overflow:hidden">
           <strong>Unbanked</strong>
@@ -87,8 +83,8 @@
         </div>
       </header>
 
-      <div class="row" style="grid-template-rows:auto auto auto 1fr; overflow:hidden">
-        <!-- Payment (recipient must be a handle) -->
+      <!-- Payment -->
+      <div class="row">
         <div class="row">
           <label for="payTo">Pay</label>
           <input id="payTo" placeholder="Recipient handle (e.g. alice)" pattern="^[a-zA-Z0-9_.-]{3,32}$" autocomplete="off">
@@ -96,14 +92,14 @@
         <div class="row">
           <label for="amount">Amount</label>
           <input id="amount" inputmode="decimal" placeholder="0.00" autocomplete="off">
-          <div class="row-inline tiny muted">
-            <span>Currency</span>
-            <select id="currency">
-              <option>ZAR</option><option>USD</option><option>EUR</option><option>GBP</option>
-              <option>BTC</option><option>ETH</option><option value="CUSTOM">Custom…</option>
-            </select>
-            <input id="customCurrency" placeholder="CODE" maxlength="6" style="width:96px; display:none">
-          </div>
+        </div>
+        <div class="row-inline tiny muted">
+          <span>Currency</span>
+          <select id="currency">
+            <option>ZAR</option><option>USD</option><option>EUR</option><option>GBP</option>
+            <option>BTC</option><option>ETH</option><option value="CUSTOM">Custom…</option>
+          </select>
+          <input id="customCurrency" placeholder="CODE" maxlength="6" style="width:96px; display:none">
         </div>
         <div class="row">
           <label for="note">For</label>
@@ -118,33 +114,33 @@
           </div>
           <div id="claimMsg" class="tiny muted" aria-live="polite"></div>
         </div>
+      </div>
 
-        <!-- History -->
-        <div class="row" style="overflow:hidden">
-          <div class="row-inline" style="justify-content:space-between">
-            <strong>History</strong>
-            <span id="totals" class="tiny muted mono">—</span>
-          </div>
-          <div class="tabs">
-            <div class="tab active" data-filter="all">All</div>
-            <div class="tab" data-filter="credit">Received</div>
-            <div class="tab" data-filter="debit">Sent</div>
-          </div>
-          <div style="flex:1; overflow:auto; max-height:32vh">
-            <table id="hist">
-              <thead>
-                <tr>
-                  <th>Date</th><th>Type</th><th>Counterparty</th><th>Note</th><th>Cur</th><th class="right">Amount</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <div class="pager">
-            <a href="#" id="newer" class="tiny">← Newer</a>
-            <span class="tiny muted" id="pageInfo"></span>
-            <a href="#" id="older" class="tiny">Older →</a>
-          </div>
+      <!-- History -->
+      <div class="row">
+        <div class="row-inline" style="justify-content:space-between">
+          <strong>History</strong>
+          <span id="totals" class="tiny muted mono">—</span>
+        </div>
+        <div class="tabs">
+          <div class="tab active" data-filter="all">All</div>
+          <div class="tab" data-filter="credit">Received</div>
+          <div class="tab" data-filter="debit">Sent</div>
+        </div>
+        <div style="overflow:auto">
+          <table id="hist">
+            <thead>
+              <tr>
+                <th>Date</th><th>Type</th><th>Counterparty</th><th>Note</th><th>Cur</th><th class="right">Amount</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <a href="#" id="newer" class="tiny">← Newer</a>
+          <span class="tiny muted" id="pageInfo"></span>
+          <a href="#" id="older" class="tiny">Older →</a>
         </div>
       </div>
 
@@ -247,23 +243,18 @@
 
     // Actions
     currencyEl.addEventListener("change",()=>{ customCurEl.style.display = (currencyEl.value==="CUSTOM")?"inline-block":"none"; });
-
-    tabs.forEach(tab => tab.addEventListener("click", ()=>{
-      tabs.forEach(t=>t.classList.remove("active"));
-      tab.classList.add("active");
-      currentFilter = tab.getAttribute("data-filter") || "all";
-      renderHistory();
-    }));
+    tabs.forEach(tab => tab.addEventListener("click", ()=>{ tabs.forEach(t=>t.classList.remove("active")); tab.classList.add("active"); currentFilter = tab.getAttribute("data-filter") || "all"; renderHistory(); }));
 
     btnAuthenticate.addEventListener("click", async ()=>{
       const h=(authHandle.value||"").trim();
       const s=authSecret.value;
       if (!h || !s) { toast(authMsg,"Enter handle and secret.","err"); return; }
-      // If new user, server requires acceptedDisclaimer=true; for existing, it's ignored.
-      const accepted = !!acceptDisclaimer.checked;
+      const accepted = !!acceptDisclaimer.checked; // required only for first-time users
       try { const a = await apiAuthenticate(h,s,accepted); setAuth(a); showApp(); }
       catch(err){ toast(authMsg, String(err.message||err), "err"); }
     });
+
+    document.addEventListener("keydown",(e)=>{ if(e.key==="Enter" && authScreen.style.display!=="none"){ btnAuthenticate.click(); }});
 
     makeLinkBtn.addEventListener("click", async ()=>{
       if (!localStorage.getItem("ub_apiKey")) { showAuth(); return; }
