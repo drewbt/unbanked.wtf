@@ -35,7 +35,7 @@
 </head>
 <body>
   <div class="wrap">
-    <!-- AUTH SCREEN -->
+    <!-- AUTH -->
     <div id="authScreen" class="card" style="display:none">
       <header>
         <strong>Unbanked</strong>
@@ -68,7 +68,7 @@
       </div>
     </div>
 
-    <!-- APP SCREEN -->
+    <!-- APP -->
     <div id="appScreen" class="card" style="display:none">
       <header>
         <div class="row-inline" style="gap:10px; flex-wrap:nowrap; overflow:hidden">
@@ -86,7 +86,7 @@
       <div class="row">
         <div class="row">
           <label for="payTo">Pay</label>
-          <input id="payTo" placeholder="Recipient handle (e.g. alice)" pattern="^[a-zA-Z0-9_.-]{3,32}$" autocomplete="off">
+          <input id="payTo" placeholder="Recipient handle (e.g. @alice or alice)" autocomplete="off">
         </div>
         <div class="row">
           <label for="amount">Amount</label>
@@ -152,35 +152,13 @@
 
   <script>
     const $ = id => document.getElementById(id);
-    const authScreen = $("authScreen");
-    const appScreen = $("appScreen");
-    const btnAuthenticate = $("btnAuthenticate");
-    const authHandle = $("authHandle");
-    const authSecret = $("authSecret");
-    const acceptDisclaimer = $("acceptDisclaimer");
-    const authMsg = $("authMsg");
-
-    const who = $("who");
-    const balancesLine = $("balancesLine");
-    const currencyEl = $("currency");
-    const customCurEl = $("customCurrency");
-    const payToEl = $("payTo");
-    const amountEl = $("amount");
-    const noteEl = $("note");
-    const makeLinkBtn = $("makeLink");
-    const linkArea = $("linkArea");
-    const linkOut = $("linkOut");
-    const copyBtn = $("copyBtn");
-    const linkMsg = $("linkMsg");
-    const claimMsg = $("claimMsg");
-    const histBody = $("hist").querySelector("tbody");
-    const totalsEl = $("totals");
-    const refreshBtn = $("refresh");
-    const logoutBtn = $("logout");
-    const tabs = Array.from(document.querySelectorAll(".tab"));
-    const newer = $("newer");
-    const older = $("older");
-    const pageInfo = $("pageInfo");
+    const authScreen = $("authScreen"), appScreen = $("appScreen");
+    const btnAuthenticate = $("btnAuthenticate"), authHandle = $("authHandle"), authSecret = $("authSecret"), acceptDisclaimer = $("acceptDisclaimer"), authMsg = $("authMsg");
+    const who = $("who"), balancesLine = $("balancesLine"), currencyEl = $("currency"), customCurEl = $("customCurrency");
+    const payToEl = $("payTo"), amountEl = $("amount"), noteEl = $("note"), makeLinkBtn = $("makeLink");
+    const linkArea = $("linkArea"), linkOut = $("linkOut"), copyBtn = $("copyBtn"), linkMsg = $("linkMsg"), claimMsg = $("claimMsg");
+    const histBody = $("hist").querySelector("tbody"), totalsEl = $("totals"), refreshBtn = $("refresh"), logoutBtn = $("logout");
+    const tabs = Array.from(document.querySelectorAll(".tab")), newer = $("newer"), older = $("older"), pageInfo = $("pageInfo");
 
     function showAuth(){ authScreen.style.display="grid"; appScreen.style.display="none"; }
     function showApp(){ authScreen.style.display="none"; appScreen.style.display="grid"; }
@@ -209,10 +187,7 @@
       const j=await r.json(); if(!r.ok) throw new Error(j.error||"history failed"); return j;
     }
 
-    let lastBalances = {};
-    let lastTx = [];
-    let page = { offset: 0, limit: 100, total: 0, hasOlder: false, hasNewer: false };
-    let currentFilter = "all";
+    let lastBalances = {}; let lastTx = []; let page = { offset: 0, limit: 100, total: 0, hasOlder: false, hasNewer: false }; let currentFilter = "all";
 
     function renderBalancesLine(){
       const entries = Object.entries(lastBalances).filter(([,v])=>Math.abs(v) > 1e-12);
@@ -242,7 +217,7 @@
       const h=(authHandle.value||"").trim();
       const s=authSecret.value;
       if (!h || !s) { toast(authMsg,"Enter handle and secret.","err"); return; }
-      const accepted = !!acceptDisclaimer.checked;
+      const accepted = !!acceptDisclaimer.checked; // required only if creating a new account
       try { const a = await apiAuthenticate(h,s,accepted); setAuth(a); showApp(); }
       catch(err){ toast(authMsg, String(err.message||err), "err"); }
     });
@@ -251,7 +226,8 @@
 
     makeLinkBtn.addEventListener("click", async ()=>{
       if (!localStorage.getItem("ub_apiKey")) { showAuth(); return; }
-      const toHandle = (payToEl.value||"").trim();
+      let toHandle = (payToEl.value||"").trim();
+      if (toHandle.startsWith("@")) toHandle = toHandle.slice(1);
       if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(toHandle)){ toast(linkMsg,"Enter a valid handle (letters, numbers, _ . -)", "err"); return; }
       const amount = Number((amountEl.value||"").trim());
       const currency = chosenCurrency();
@@ -260,7 +236,7 @@
       try {
         const { url } = await apiLink({ toHandle, amount, currency, note });
         linkOut.value = url; linkArea.style.display = "grid"; toast(linkMsg, `Link locked to @${toHandle}.`, "muted");
-      } catch(e){ toast(linkMsg,e.message,"err"); }
+      } catch(e){ toast(linkMsg, (e && e.message) ? e.message : "Could not create link", "err"); }
     });
 
     copyBtn.addEventListener("click", async ()=>{ try{ await navigator.clipboard.writeText(linkOut.value); toast(linkMsg,"Copied","ok"); } catch{ linkOut.select(); document.execCommand("copy"); toast(linkMsg,"Copied (fallback)","ok"); } });
@@ -284,7 +260,6 @@
     (async function boot(){
       if (!localStorage.getItem("ub_apiKey")) showAuth(); else showApp();
       uiAuth();
-
       const claim = new URL(location.href).searchParams.get("claim");
       if (claim && localStorage.getItem("ub_apiKey")){
         try {
